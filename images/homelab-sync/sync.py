@@ -237,12 +237,9 @@ def read_stored(io, seed):
     return design, canvas, hl.seed_items(io.rpk_get().get("resources", [])), True
 
 
-def write_docs(io, items, fresh, node_ids, log):
+def write_docs(io, items, node_ids, log):
     existing = {d.get("node_id"): d for d in io.documents()}
     docs = hl.workload_docs(items)
-    for name in fresh:
-        if name not in docs and (existing.get(node_ids.get(name.lower())) or {}).get("title") == f"{name} workloads":
-            docs[name] = "No workloads.\n"
     conflicts = 0
     for parent, body in sorted(docs.items()):
         nid = node_ids.get(parent.lower())
@@ -352,9 +349,7 @@ def run(io, hosts, today, log, seed=False):
         log(f"homelable: save failed: {type(exc).__name__}: {exc}")
         return 1
     try:
-        fresh = [i["name"] for i in items if i["name"].lower().startswith("app/") and i["labels"].get("indexed") != "no"]
-        fresh += [f"vm/{scan.get('host') or alias}" for alias, scan in scans.items() if scan.get("truenas") is not None]
-        if write_docs(io, resources, fresh, {hl._name(n).lower(): n["id"] for n in body["nodes"] if hl._is_sync(n)}, log):
+        if write_docs(io, resources, {hl._name(n).lower(): n["id"] for n in body["nodes"] if hl._is_sync(n)}, log):
             exit_code = 1
     except Exception as exc:
         exit_code = 1

@@ -209,15 +209,6 @@ class Sync(unittest.TestCase):
         self.assertEqual(io.updated_docs, [])
         self.assertFalse(any(d["node_id"] == nid for d in io.created_docs))
 
-    def test_last_workload_gone_empties_page(self):
-        first = FakeIO()
-        run(first)
-        nid = nodes(first)["app/loose"]["id"]
-        io = FakeIO(docs={nid: ("doc-1", "## loose/deploy/stray\n", "app/loose workloads")})
-        io.k8s = lambda: dict(fx.k8s(), deployments=[d for d in fx.k8s()["deployments"] if d["metadata"]["name"] != "stray"])
-        run(io)
-        self.assertIn(("doc-1", {"body": "No workloads.\n", "revision_reason": "import"}), io.updated_docs)
-
     def test_page_renamed_after_list_not_written(self):
         first = FakeIO()
         run(first)
@@ -266,26 +257,6 @@ class Sync(unittest.TestCase):
         io.k8s = lambda: dict(fx.k8s(), deployments=[d for d in fx.k8s()["deployments"] if d["metadata"]["name"] != "stray"])
         run(io)
         self.assertEqual(io.updated_docs, [])
-
-    def test_truenas_without_apps_empties_page(self):
-        first = FakeIO(design=False)
-        run(first)
-        saved = first.saves[0]
-        nid = nodes(first)["vm/truenas"]["id"]
-        io = FakeIO(docs={nid: ("doc-1", "## truenas/app/silo\n", "vm/truenas workloads")})
-        io.canvas = lambda design_id: json.loads(json.dumps(
-            {"nodes": saved["nodes"], "edges": [], "viewport": {}, "custom_style": None}))
-        orig = io.scan
-
-        def scan(alias, target):
-            out = orig(alias, target)
-            if out.get("truenas"):
-                out["truenas"]["apps"] = []
-            return out
-
-        io.scan = scan
-        run(io)
-        self.assertIn(("doc-1", {"body": "No workloads.\n", "revision_reason": "import"}), io.updated_docs)
 
     def test_incomplete_canvas_saves_nothing(self):
         io = FakeIO()
