@@ -245,6 +245,19 @@ class Sync(unittest.TestCase):
         self.assertEqual({p["key"]: p["value"] for p in got["properties"]}["health"], "Healthy")
         self.assertNotIn("changed_facts", got)
 
+    def test_last_workload_gone_keeps_page(self):
+        first = FakeIO(design=False)
+        run(first)
+        saved = first.saves[0]
+        nid = nodes(first)["app/loose"]["id"]
+        io = FakeIO(docs={nid: ("doc-1", "## loose/deploy/stray\n", "app/loose workloads")})
+        io.canvas = lambda design_id: json.loads(json.dumps(
+            {"nodes": saved["nodes"], "edges": [], "viewport": {}, "custom_style": None}))
+        io.k8s = lambda: dict(fx.k8s(), deployments=[d for d in fx.k8s()["deployments"] if d["metadata"]["name"] != "stray"])
+        self.assertEqual(run(io), 0)
+        self.assertFalse(any(d == "doc-1" for d, _ in io.updated_docs))
+        self.assertFalse(any(d["node_id"] == nid for d in io.created_docs))
+
     def test_unindexed_namespace_page_kept(self):
         first = FakeIO(design=False)
         run(first)
