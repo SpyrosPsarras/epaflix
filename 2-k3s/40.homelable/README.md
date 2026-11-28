@@ -28,7 +28,7 @@ Scripts call `http://homelable.homelable.svc` with `X-MCP-Service-Key`. The ingr
 
 ## Homelab index
 
-The nightly sync owns the design `Homelab index` and rewrites it every night. Draw your own maps on other designs. The UI saves a whole design at once, so a tab opened on `Homelab index` before the 03:30 sync and saved after it deletes the nodes that run added; the next run puts them back.
+The nightly sync owns the design `Homelab index` and rewrites it every night. Do not rename it: the next run would create a new `Homelab index` and move the synced nodes into it. Draw your own maps on other designs. The UI saves a whole design at once, so a tab opened on `Homelab index` before the 03:30 sync and saved after it deletes the nodes that run added; the next run puts them back.
 
 ## Nightly sync
 
@@ -36,10 +36,10 @@ CronJob `homelab-sync` runs at 03:30 Europe/Athens. It reads the Kubernetes API 
 
 1. commits the masked host files, package lists and ConfigMaps to Forgejo `homelab-bot/homelab-live`, after gitleaks drops anything it flags;
 2. reads `Homelab index` again and saves it with every host, Proxmox host, guest, Argo app and namespace as a node;
-3. writes each Argo app's workloads (and TrueNAS's apps) to that node's page, only when the text changed;
+3. writes each Argo app's workloads (and TrueNAS's apps) to that node's page, only when the text changed and the page is still titled `<node> workloads`. A page whose last workload is gone keeps its last list;
 4. presses Git sync, so `homelab-bot/homelable-config` gets the night's state.
 
-Sync nodes carry property `managed-by: homelab-sync`. Their notes, position, size, colours, icon and edges are carried over; their name, type, IP, ping check and other properties come from the sync. Nodes without that property are sent back unchanged. A node that a successful source no longer reports gets property `gone-since: <date>` and stays until a person deletes it. If a source fails, its nodes keep their last facts, its pages are not rewritten, and the Job exits 1, which fires `KubeJobFailedLastRun`. If Homelable cannot be read, nothing is saved.
+Sync nodes carry properties `managed-by: homelab-sync` and `index-name`. Their notes, position, size, colours, icon, edges and any property you add are carried over; their name, type, IP, ping check and the properties the sync sets come from the sync. Nodes without that property are sent back unchanged. A node that a successful source no longer reports gets property `gone-since: <date>` and stays until a person deletes it. If a source fails, its nodes keep their last facts, its pages are not rewritten, and the Job exits 1, which fires `KubeJobFailedLastRun`. If Homelable cannot be read, nothing is saved.
 
 Hosts and guests with a known address (the `HOSTS` list, or a static `ip=` in the Proxmox guest config) get a ping check. Guests on DHCP get none. Guests sit inside their Proxmox host's box.
 
