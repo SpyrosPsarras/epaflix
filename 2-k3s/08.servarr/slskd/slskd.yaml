@@ -132,6 +132,7 @@ spec:
             - { name: SLSKD_INCOMPLETE_DIR, value: /media/downloads/soulseek-incomplete }
             - { name: SLSKD_VPN, value: "true" }
             - { name: SLSKD_VPN_GLUETUN_URL, value: "http://127.0.0.1:8000" }
+            - { name: SLSKD_VPN_GLUETUN_TIMEOUT, value: "10000" }
             - name: SLSKD_VPN_GLUETUN_API_KEY
               valueFrom: { secretKeyRef: { name: slskd, key: SLSKD_VPN_GLUETUN_API_KEY } }
             - name: SLSKD_SLSK_USERNAME

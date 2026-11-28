@@ -253,7 +253,7 @@ class SlskdTests(unittest.TestCase):
         }.items(), env_of(gluetun).items())
         self.assertLessEqual({
             "SLSKD_VPN": "true", "SLSKD_VPN_GLUETUN_URL": "http://127.0.0.1:8000",
-            "SLSKD_SLSK_LISTEN_PORT": "46327",
+            "SLSKD_VPN_GLUETUN_TIMEOUT": "10000", "SLSKD_SLSK_LISTEN_PORT": "46327",
         }.items(), env_of(self.container("slskd")).items())
 
     def test_download_dirs_created_before_slskd(self):
