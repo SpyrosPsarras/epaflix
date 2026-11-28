@@ -8,7 +8,7 @@ Navidrome serves Lidarr's music library from `/media/music` on `servarr-media`, 
 
 ## Owner-first login
 
-The first account that logs in through Authentik becomes the Navidrome admin. Before anyone joins `Music users`, confirm that account is the owner and has `is_admin = 1`. Household members get their own Navidrome user on first login through Authentik, as the owner did.
+The first account that logs in through Authentik becomes the Navidrome admin. Before anyone joins `Music users`, confirm that account is the owner and has `is_admin = 1`. `Servarr users` is a child group of `Music users`, so every Servarr member has access. Members get their own Navidrome user on first login through Authentik, as the owner did.
 
 ## Remaining check
 
