@@ -531,6 +531,15 @@ spec:
           annotations:
             summary: "Paperless {{ $labels.container }} keeps restarting"
             description: "{{ $labels.container }} restarted 3 times in 15 minutes. Emails and Office files wait in the Paperless task list until it recovers. Check the paperless-converters Deployment in namespace paperless."
+        - alert: PaperlessThreadSyncRestarting
+          expr: increase(kube_pod_container_status_restarts_total{namespace="paperless",container="thread-sync"}[15m]) >= 3
+          for: 0m
+          labels:
+            severity: warning
+            component: paperless
+          annotations:
+            summary: "Paperless Gmail thread sync keeps restarting"
+            description: "thread-sync restarted 3 times in 15 minutes, so new Gmail receipts and replies are not imported. Check its logs in the paperless Deployment in namespace paperless."
         - alert: PaperlessGptDown
           expr: |
             max(kube_deployment_status_replicas_available{namespace="paperless",deployment="paperless-gpt"}) == 0

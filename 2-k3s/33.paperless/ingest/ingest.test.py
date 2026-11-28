@@ -129,6 +129,11 @@ class ConfigureRuntimeTests(unittest.TestCase):
                     raise ValueError('missing prerequisite')
                 return self.rows[key]
 
+            def get_or_create(self, name, defaults):
+                if name in self.rows:
+                    return self.rows[name], False
+                return self.update_or_create(name, defaults)
+
             def update_or_create(self, name, defaults):
                 created = name not in self.rows
                 row = self.rows.setdefault(name, SimpleNamespace(name=name, assign_tags=Relation()))
@@ -146,13 +151,14 @@ class ConfigureRuntimeTests(unittest.TestCase):
         self.accounts = Manager()
         self.rules = Manager()
         self.workflows = Manager({'Tag new receipts for AI': self.workflow})
+        self.fields = Manager()
         self.modules = {
             'django': SimpleNamespace(),
             'django.contrib': SimpleNamespace(),
             'django.contrib.auth': SimpleNamespace(get_user_model=lambda: SimpleNamespace(objects=self.users)),
             'django.db': SimpleNamespace(transaction=SimpleNamespace(atomic=contextlib.nullcontext)),
             'documents': SimpleNamespace(),
-            'documents.models': SimpleNamespace(Tag=SimpleNamespace(objects=self.tags, MATCH_NONE=0), Workflow=SimpleNamespace(objects=self.workflows), WorkflowTrigger=SimpleNamespace(WorkflowTriggerType=SimpleNamespace(DOCUMENT_ADDED=2))),
+            'documents.models': SimpleNamespace(CustomField=SimpleNamespace(objects=self.fields, FieldDataType=SimpleNamespace(STRING='string')), Tag=SimpleNamespace(objects=self.tags, MATCH_NONE=0), Workflow=SimpleNamespace(objects=self.workflows), WorkflowTrigger=SimpleNamespace(WorkflowTriggerType=SimpleNamespace(DOCUMENT_ADDED=2))),
             'paperless_mail': SimpleNamespace(),
             'paperless_mail.models': SimpleNamespace(
                 MailAccount=SimpleNamespace(objects=self.accounts, ImapSecurity=SimpleNamespace(SSL=2), MailAccountType=SimpleNamespace(IMAP=1)),
@@ -192,6 +198,8 @@ class ConfigureRuntimeTests(unittest.TestCase):
             self.assertIs(rule.owner, self.owner)
             self.assertTrue(rule.assign_owner_from_rule)
             self.assertEqual((rule.maximum_age, rule.action, rule.assign_title_from, rule.assign_correspondent_from, rule.attachment_type), (0, 5, 1, 1, 1))
+            self.assertFalse(rule.enabled)
+        self.assertEqual(self.fields.rows['Gmail thread'].data_type, 'string')
         self.assertEqual([tag.name for tag in receipt.assign_tags.items], ['source:gmail', 'paperless-gpt-auto'])
         self.assertEqual([tag.name for tag in attachments.assign_tags.items], ['source:gmail', 'paperless-gpt-auto'])
         self.assertEqual([tag.name for tag in self.trigger.filter_has_not_tags.items], ['source:gmail', 'source:drive'])

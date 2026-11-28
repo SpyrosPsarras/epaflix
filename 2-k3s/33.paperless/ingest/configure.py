@@ -5,7 +5,7 @@ import sys
 def main():
     from django.contrib.auth import get_user_model
     from django.db import transaction
-    from documents.models import Tag, Workflow, WorkflowTrigger
+    from documents.models import CustomField, Tag, Workflow, WorkflowTrigger
     from paperless_mail.models import MailAccount, MailRule
 
     config = json.load(sys.stdin)
@@ -47,6 +47,8 @@ def main():
             },
         )
         names.append('gmail')
+        CustomField.objects.get_or_create(name='Gmail thread', defaults={'data_type': CustomField.FieldDataType.STRING})
+        names.append('Gmail thread')
         rules = [
             ('gmail-receipt-bodies', 'paperless-receipt-body', MailRule.ConsumptionScope.EML_ONLY, 'paperless-done-eml', None),
             ('gmail-attachments', 'paperless-receipt', MailRule.ConsumptionScope.ATTACHMENTS_ONLY, 'paperless-done-att', '*.pdf,*.doc,*.docx,*.xls,*.xlsx,*.odt,*.ods'),
@@ -58,7 +60,7 @@ def main():
                     'owner': owner,
                     'account': account,
                     'order': order,
-                    'enabled': True,
+                    'enabled': False,
                     'folder': folder,
                     'maximum_age': 0,
                     'action': MailRule.MailAction.TAG,

@@ -307,11 +307,10 @@ class DjangoStore:
         return self._thread_roots(thrid).filter(document_id__in=roots).values_list('document_id', flat=True).first()
 
     def queue(self, part, root_id, thrid, title, label=None, file_key=None):
-        import tempfile
         from documents.data_models import ConsumableDocument, DocumentMetadataOverrides, DocumentSource
         from documents.tasks import consume_file
         self.settings.SCRATCH_DIR.mkdir(parents=True, exist_ok=True)
-        path = Path(tempfile.mkdtemp(prefix='thread-sync-', dir=self.settings.SCRATCH_DIR)) / f'{file_key or key(part)}-{part.name}'
+        path = self.settings.SCRATCH_DIR / f'{file_key or key(part)}-{part.name}'
         path.write_bytes(part.data)
         if root_id is None:
             overrides = DocumentMetadataOverrides(title=title, filename=part.name, tag_ids=self.tag_ids, owner_id=self.owner.id, custom_fields={self.field.id: thrid})

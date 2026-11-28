@@ -130,12 +130,58 @@ spec:
               mountPath: /srv/paperless
             - name: consume
               mountPath: /usr/src/paperless/consume
+            - name: scratch
+              mountPath: /tmp/paperless
+        # One document per Gmail thread; see ingest/thread_sync.py. A failed run exits, and kubelet restarts only this container.
+        - name: thread-sync
+          image: ghcr.io/paperless-ngx/paperless-ngx:3.4.2
+          workingDir: /usr/src/paperless/src
+          command: [sh, -c, "while python3 manage.py shell -v 0 < /ingest/thread_sync.py; do sleep 600; done"]
+          envFrom:
+            - secretRef:
+                name: paperless-secrets
+          env:
+            - {name: PAPERLESS_REDIS, value: "redis://127.0.0.1:6379"}
+            - {name: PAPERLESS_DBENGINE, value: postgresql}
+            - {name: PAPERLESS_DBHOST, value: postgres-cluster-rw.postgres-system.svc}
+            - {name: PAPERLESS_DBNAME, value: paperless}
+            - {name: PAPERLESS_DBUSER, value: paperless}
+            - {name: PAPERLESS_DATA_DIR, value: /srv/paperless/data}
+            - {name: PAPERLESS_MEDIA_ROOT, value: /srv/paperless/media}
+            - {name: PAPERLESS_TIME_ZONE, value: Europe/Oslo}
+          securityContext:
+            runAsUser: 1000
+            runAsGroup: 1000
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: [ALL]
+          resources:
+            requests:
+              cpu: 20m
+              memory: 128Mi
+            limits:
+              memory: 512Mi
+          volumeMounts:
+            - name: data
+              mountPath: /srv/paperless
+            - name: scratch
+              mountPath: /tmp/paperless
+            - name: thread-sync
+              mountPath: /ingest
+              readOnly: true
       volumes:
         - name: data
           persistentVolumeClaim:
             claimName: paperless-data
         - name: consume
           emptyDir: {}
+        # Files thread-sync queues wait here until the Paperless worker imports them.
+        - name: scratch
+          emptyDir: {}
+        - name: thread-sync
+          configMap:
+            name: paperless-thread-sync
         - name: valkey-data
           emptyDir: {}
 ---
