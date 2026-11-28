@@ -17,6 +17,12 @@ resources:
 generators:
   - ksops-generator.yaml
 
+configMapGenerator:
+  - name: paperless-thread-sync
+    namespace: paperless
+    files:
+      - ingest/thread_sync.py
+
 images:
   - name: docker.io/apache/tika
     newTag: 3.3.3.0@sha256:326b238b37904c94ff61fed87afe0af72e6a29fa715933b10af97b7d56f1d4cb

@@ -5,8 +5,8 @@ import sys
 def main():
     from django.contrib.auth import get_user_model
     from django.db import transaction
-    from documents.models import Tag, Workflow, WorkflowTrigger
-    from paperless_mail.models import MailAccount, MailRule
+    from documents.models import CustomField, Tag, Workflow, WorkflowTrigger
+    from paperless_mail.models import MailAccount
 
     config = json.load(sys.stdin)
     if not isinstance(config, dict) or any(
@@ -47,34 +47,8 @@ def main():
             },
         )
         names.append('gmail')
-        rules = [
-            ('gmail-receipt-bodies', 'paperless-receipt-body', MailRule.ConsumptionScope.EML_ONLY, 'paperless-done-eml', None),
-            ('gmail-attachments', 'paperless-receipt', MailRule.ConsumptionScope.ATTACHMENTS_ONLY, 'paperless-done-att', '*.pdf,*.doc,*.docx,*.xls,*.xlsx,*.odt,*.ods'),
-        ]
-        for order, (name, folder, scope, label, filename_filter) in enumerate(rules, 1):
-            rule, _ = MailRule.objects.update_or_create(
-                name=name,
-                defaults={
-                    'owner': owner,
-                    'account': account,
-                    'order': order,
-                    'enabled': True,
-                    'folder': folder,
-                    'maximum_age': 0,
-                    'action': MailRule.MailAction.TAG,
-                    'action_parameter': label,
-                    'assign_title_from': MailRule.TitleSource.FROM_SUBJECT,
-                    'assign_correspondent_from': MailRule.CorrespondentSource.FROM_NOTHING,
-                    'assign_correspondent': None,
-                    'assign_owner_from_rule': True,
-                    'attachment_type': MailRule.AttachmentProcessing.ATTACHMENTS_ONLY,
-                    'filter_attachment_filename_include': filename_filter,
-                    'consumption_scope': scope,
-                    'stop_processing': False,
-                },
-            )
-            rule.assign_tags.set([tags['source:gmail'], ai_tag])
-            names.append(name)
+        CustomField.objects.get_or_create(name='Gmail thread', defaults={'data_type': CustomField.FieldDataType.STRING})
+        names.append('Gmail thread')
         for trigger in triggers:
             trigger.filter_has_not_tags.add(tags['source:gmail'], tags['source:drive'])
         names.append('Tag new receipts for AI')

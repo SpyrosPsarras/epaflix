@@ -244,6 +244,28 @@ tests:
       - eval_time: 30m
         alertname: PaperlessConverterRestarting
         exp_alerts: []
+  - name: Paperless thread sync fires after three restarts within 15 minutes
+    interval: 1m
+    input_series:
+      - series: 'kube_pod_container_status_restarts_total{namespace="paperless",container="thread-sync"}'
+        values: '0x4 1x4 2x4 3x5'
+      - series: 'kube_pod_container_status_restarts_total{namespace="paperless",container="paperless"}'
+        values: '0x4 1x4 2x4 3x5'
+    alert_rule_test:
+      - eval_time: 14m
+        alertname: PaperlessThreadSyncRestarting
+        exp_alerts: []
+      - eval_time: 15m
+        alertname: PaperlessThreadSyncRestarting
+        exp_alerts:
+          - exp_labels:
+              namespace: paperless
+              container: thread-sync
+              severity: warning
+              component: paperless
+            exp_annotations:
+              summary: "Paperless Gmail thread sync keeps restarting"
+              description: "thread-sync restarted 3 times in 15 minutes, so new Gmail receipts and replies are not imported. Check its logs in the paperless Deployment in namespace paperless."
   - name: Paperless healthy deployment stays silent
     interval: 1m
     input_series:

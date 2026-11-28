@@ -23,6 +23,7 @@ With the owner's approval, the agent ran a `manage.py shell` script with `get_or
 |---|---|---|---|
 | Group | `receipts` | 1 | view, add, change and delete on Document, Note, SavedView and UISettings; view, add and change on Tag, Correspondent, DocumentType and CustomField, 28 permissions in total |
 | Custom field | `Total` | 1 | type monetary, `extra_data` empty, so no default currency |
+| Custom field | `Gmail thread` | | type string, created by `ingest/configure.py`; thread-sync stores the Gmail thread ID in it |
 | Tag | `paperless-gpt-auto` | 1 | matching algorithm None, so Paperless never assigns it on its own |
 | Workflow | `Tag new receipts for AI` | 1 | trigger 1 Document Added excluding `source:gmail` and `source:drive`, action 1 assigns tag `paperless-gpt-auto` |
 | User | `paperless-gpt` | 3 | superuser, unusable password, API token in `paperless-gpt-secrets` |
@@ -51,7 +52,7 @@ Browser login inside the app is requested upstream in Paperless Go issue #51. Fo
 
 Deployment `paperless-gpt`, image `icereed/paperless-gpt`, reads Paperless OCR text and asks `qwen3.8-bonsai:27b` on llama-server at `http://llama-server.ai.svc.cluster.local:8080/v1` through its OpenAI provider. The model thinks before each answer. LLM OCR stays off. It calls `http://paperless:8000` with the API token of user `paperless-gpt`.
 
-Workflow `Tag new receipts for AI` tags new documents `paperless-gpt-auto`, except those tagged `source:gmail` or `source:drive`. The Gmail rules assign it themselves, as Mail rules describes. paperless-gpt polls that tag and sets the title, the shop as correspondent, tags, document type and `Total`. Then it removes `paperless-gpt-auto` and adds `paperless-gpt-auto-complete`, or `paperless-gpt-failed` when Paperless rejects a value. It creates those two tags at startup. It picks only existing tags and document types and may create new shops.
+Workflow `Tag new receipts for AI` tags new documents `paperless-gpt-auto`, except those tagged `source:gmail` or `source:drive`. thread-sync assigns it to new Gmail documents, as Gmail threads describes. paperless-gpt polls that tag and sets the title, the shop as correspondent, tags, document type and `Total`. Then it removes `paperless-gpt-auto` and adds `paperless-gpt-auto-complete`, or `paperless-gpt-failed` when Paperless rejects a value. It creates those two tags at startup. It picks only existing tags and document types and may create new shops.
 
 With `AUTO_GENERATE_CREATED_DATE=false`, paperless-gpt leaves the created date alone. Paperless uses the mail's Date header for email bodies. For attachments and phone scans, it uses the first date it finds in the document text, or the import day.
 
@@ -103,7 +104,7 @@ If AI date generation is turned back on, the date prompt can misread US receipts
 
 ## Email and Drive import
 
-The [import design](../../docs/superpowers/specs/2026-11-10-paperless-ingest-design.md) covers scope and limits. Gmail imports run every 10 minutes. Drive import is a one-off copy, not a sync. Both keep the originals and assign imported documents to the owner, not other Paperless users.
+The [import design](../../docs/superpowers/specs/2026-11-10-paperless-ingest-design.md) covers scope and limits. Gmail imports run every 10 minutes in container `thread-sync`. Drive import is a one-off copy, not a sync. Both keep the originals and assign imported documents to the owner, not other Paperless users.
 
 Deployment and Service `paperless-converters` run Tika on port 9998 and Gotenberg on port 3000 for email PDFs and Office files. NetworkPolicy `paperless-converters-ingress` admits only Paperless pods. Gotenberg disables JavaScript and allows only local files under `/tmp`, so email scripts and tracking pixels cannot load. Converter failures do not take the Paperless pod offline. `PaperlessConverterRestarting` warns when either converter restarts at least three times in 15 minutes.
 
@@ -119,22 +120,45 @@ Both Gmail filters exclude Promotions, Social and Forums. They match mail that m
 
 The attachment filter adds `paperless-receipt` using `filename:(pdf OR doc OR docx OR xls OR xlsx OR odt OR ods)`. The body filter adds `paperless-receipt-body` using `-filename:(pdf OR doc OR docx OR xls OR xlsx OR odt OR ods)`.
 
-The old body-wide keyword filter was deleted and its label removed from all mail. The two current filters were applied to existing mail on 2026-11-18. If a filter misses a receipt, add `paperless-receipt` by hand to import eligible attachments or `paperless-receipt-body` to import the email body when there are no eligible attachments.
+The old body-wide keyword filter was deleted and its label removed from all mail. The two current filters were applied to existing mail on 2026-11-18. If a filter misses a receipt, add `paperless-receipt` or `paperless-receipt-body` by hand. Either label opts the message in; thread-sync imports its PDF and Office files and uses the email page only when there are none. Replies need no label; thread-sync finds them by thread.
 
-### Mail rules
+### Gmail threads
 
-`ingest/configure.py` creates or updates mail account `gmail` and these rules. Both have no age limit, use the email subject as title, assign no correspondent and tag documents `source:gmail` and `paperless-gpt-auto`.
+Container `thread-sync` in the Paperless pod imports Gmail receipts every 10 minutes with `ingest/thread_sync.py`; design: [Gmail threads](../../docs/superpowers/specs/2026-11-28-paperless-gmail-threads-design.md). One receipt conversation becomes one document:
 
-| Order | Rule | Folder | Import | Filename filter | Gmail label after import |
-|---|---|---|---|---|---|
-| 1 | `gmail-receipt-bodies` | `paperless-receipt-body` | Email body as PDF | None | `paperless-done-eml` |
-| 2 | `gmail-attachments` | `paperless-receipt` | Attachments only, excluding inline files | `*.pdf,*.doc,*.docx,*.xls,*.xlsx,*.odt,*.ods` | `paperless-done-att` |
+- The first mail labelled `paperless-receipt` or `paperless-receipt-body` creates the document from its first PDF or Office file, attached or inline. Its other files become versions on the next run. A labelled mail without such a file creates the document from the email page.
+- Later replies in the same Gmail thread, including the owner's, add their text as a note and their files as versions. A mail counts as a reply only with an `In-Reply-To` or `References` header, so monthly bills that Gmail groups by subject stay separate documents. Replies go to the newest document of the thread.
+- When a document has two or more files, the newest version is one PDF joining all of them, labelled `All files: <ids>`. Preview, phone app and search show that file. The originals stay as older versions.
+- New documents get title from subject, the owner, tags `source:gmail` and `paperless-gpt-auto`, and custom field `Gmail thread`. Paperless skips workflows for versions, so paperless-gpt only reads the first file.
 
-The Gmail filters decide which rule sees a message, so a receipt mail produces either its PDF or Office attachments or its email body, never both. Mail with only images or logos gets `paperless-receipt-body`. When `gmail-attachments` finds no matching attachment, for example a PDF sent inline, Processed Mails lists the message as processed without import, Gmail gets no done label and nothing is imported. Add `paperless-receipt-body` by hand to import its body instead.
+Gmail labels show the state of each message:
 
-With `PAPERLESS_CONSUMER_DELETE_DUPLICATES=true`, Paperless rejects files identical to existing documents, even those in the trash. When Paperless rejects a file as a duplicate, Processed Mails lists the message as failed, Gmail gets no done label and Paperless does not retry the message. Other new attachments from that message are still imported.
+| Label | Meaning |
+|---|---|
+| `paperless-done` | Every file is in Paperless and the note exists |
+| `paperless-failed` | Paperless failed to import a file; the Paperless task list has the error |
+| `paperless-done-att`, `paperless-done-eml` | Imported by the old mail rules before 2026-11-28; thread-sync skips them |
 
-To re-import a message, permanently delete the old document if it still exists. Delete the message's entry under Mail > Processed Mails and remove the matching done label in Gmail, if present. Leave the receipt label in place.
+Each run logs one line, for example `thread-sync: read=2 created=1 versions=0 joined=0 notes=1 done=1 waiting=1 import_failed=0 failed=0`. `failed` counts messages with an error, logged with the Gmail message ID; they are retried next run. `PaperlessThreadSyncRestarting` warns when the container restarts at least three times in 15 minutes.
+
+```sh
+kubectl -n paperless logs deploy/paperless -c thread-sync --tail 20
+```
+
+To retry a failed message, fix the cause, wait until the failed task in the Paperless task list is 24 hours old, then remove `paperless-failed`. Removing it earlier puts the label back on the next run. To import a message again, permanently delete its document or version, then remove `paperless-done`. A file whose checksum exists in Paperless, trash included, is never imported twice.
+
+While mail rules named `gmail-receipt-bodies` or `gmail-attachments` exist, or their imports from the last 24 hours are queued or running, thread-sync logs `waiting until thread_migrate.py has run` and imports nothing. The migration turns those rules off and, as its last step, renames them to `… (retired)`, so Mail > Processed Mails keeps their history. `ingest/configure.py` no longer creates mail rules.
+
+### Migrate existing Gmail documents
+
+`ingest/thread_migrate.py` applies the same rules to documents the old mail rules imported. It matches each message labelled `paperless-done-att` or `paperless-done-eml` to its documents by SHA-256, sets `Gmail thread`, turns replies' email pages into notes and moves those pages to the trash, and makes replies' files versions. Without `THREAD_MIGRATE_APPLY` it only prints the plan as document IDs and a `fingerprint=` of its `version` and `delete` lines. With `THREAD_MIGRATE_APPLY=<fingerprint>` it turns the old mail rules off, waits for a running mail fetch and their queued imports, plans again and applies only if the fingerprint still matches. Otherwise it prints the new plan and stops; review it and run again with the new fingerprint. No Gmail import happens between that first attempt and the final apply. Run `ingest/configure.py` first so the `Gmail thread` field exists, run the dry run, have the owner approve the printed lines, then apply:
+
+```sh
+kubectl -n paperless exec -i deploy/paperless -c thread-sync -- python3 manage.py shell -v 0 < 2-k3s/33.paperless/ingest/thread_migrate.py
+kubectl -n paperless exec -i deploy/paperless -c thread-sync -- env THREAD_MIGRATE_APPLY='<fingerprint>' python3 manage.py shell -v 0 < 2-k3s/33.paperless/ingest/thread_migrate.py
+```
+
+Trashed documents can be restored from Paperless's trash for 30 days. The next thread-sync run builds the joined files.
 
 ### Configure Gmail
 
@@ -157,7 +181,7 @@ Read the private `$D/configure.out`. Run the vault command again to check that s
 kubectl -n paperless exec "$POD" -c paperless -- rm /tmp/configure.py
 ```
 
-Check Mail > Processed Mails and the Paperless task list after the next mail check. To rotate the app password, the owner updates the vault item, then rerun this setup with the same owner and email. Mail account credentials live in the Paperless database, not a Kubernetes Secret.
+`ingest/configure.py` creates custom field `Gmail thread`. After the migration, check the `thread-sync` log and the Paperless task list. To rotate the app password, the owner updates the vault item, then rerun this setup with the same owner and email. Mail account credentials live in the Paperless database, not a Kubernetes Secret.
 
 ### Import Drive
 
